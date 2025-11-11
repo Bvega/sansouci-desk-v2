@@ -1,0 +1,116 @@
+# Sansouci-Desk V2 - Git Ignore File
+
+# Environment configuration
+.env
+.env.local
+.env.production
+.env.testing
+
+# Vendor dependencies
+/vendor/
+
+# Storage directories
+/storage/logs/
+/storage/cache/
+/storage/uploads/
+/storage/sessions/
+
+# Bootstrap cache
+/bootstrap/cache/
+
+# Test coverage
+/coverage/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Composer
+composer.phar
+composer.lock
+
+# NPM (if using frontend build tools)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Database
+*.sqlite
+*.sqlite3
+
+# Security
+*.key
+*.crt
+*.pem
+
+# Build artifacts
+/build/
+/dist/
+
+# Documentation build
+/docs/_build/
+
+# Test artifacts
+/tests/_output/
+/tests/_support/_generated/
+
+# PhpStorm
+/.idea/
+
+# VSCode
+/.vscode/
+
+# Sublime Text
+/*.sublime-project
+/*.sublime-workspace
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+
+# Local configuration override
+config/local.php
+config/production.php
+config/development.php
+
+# Error logs
+error_log
+php_errors.log
+
+# Application specific
+/public/uploads/
+/public/storage/
+
+# Deployment
+deploy-config.json
+.deployment
+
+# Cache
+*.cache
+
+# Miscellaneous
+*.pid
+*.seed
+*.pid.lock
+*.tgz
+*.tar.gz

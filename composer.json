@@ -1,0 +1,53 @@
+{
+    "name": "sansouci/desk-system",
+    "description": "Enterprise ticketing system for Sansouci Puerto de Santo Domingo",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.1",
+        "ext-pdo": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "phpmailer/phpmailer": "^6.8",
+        "monolog/monolog": "^3.0",
+        "vlucas/phpdotenv": "^5.5",
+        "symfony/console": "^6.3",
+        "ramsey/uuid": "^4.7"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^1.10",
+        "squizlabs/php_codesniffer": "^3.7",
+        "psalm/psalm": "^5.15",
+        "fakerphp/faker": "^1.23"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test-security": "phpunit --testsuite=Security",
+        "test-coverage": "phpunit --coverage-html coverage/",
+        "analyse": "phpstan analyse",
+        "security-check": "psalm --security-analysis",
+        "style-check": "phpcs",
+        "style-fix": "phpcbf"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
