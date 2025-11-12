@@ -1,15 +1,13 @@
-; Basic PHP configuration for Sansouci-Desk V2
+[PHP]
 extension_dir = "C:\Program Files\php-8.1.33\ext"
 extension=openssl
 extension=pdo_mysql
 extension=mbstring
-extension=json
 extension=curl
-extension=tokenizer
 
-; Security settings
+; Temporarily enable for Composer
 expose_php = Off
-allow_url_fopen = Off
+allow_url_fopen = On
 
 ; Performance settings
 memory_limit = 256M

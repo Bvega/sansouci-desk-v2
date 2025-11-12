@@ -1,11 +1,11 @@
-; Basic PHP configuration for Sansouci-Desk V2
+[PHP]
 extension_dir = "C:\Program Files\php-8.1.33\ext"
 extension=openssl
+extension=pdo
 extension=pdo_mysql
 extension=mbstring
 extension=json
 extension=curl
-extension=tokenizer
 
 ; Security settings
 expose_php = Off
