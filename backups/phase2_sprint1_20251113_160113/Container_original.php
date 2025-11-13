@@ -210,20 +210,4 @@ class Container
             return new \App\Services\ValidationService();
         });
     }
-
-    /**
-     * Get container statistics for debugging
-     * 
-     * @return array<string, int> Container statistics
-     */
-    public function getStats(): array
-    {
-        return [
-            "bindings" => count($this->bindings),
-            "instances" => count($this->instances),
-            "singletons" => count($this->singletons),
-            "aliases" => count($this->aliases ?? []),
-            "tags" => count($this->tags ?? [])
-        ];
-    }
 }
