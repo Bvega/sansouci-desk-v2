@@ -1,0 +1,18 @@
+; Basic PHP configuration for Sansouci-Desk V2
+extension_dir = "ext"
+extension=openssl
+extension=pdo_mysql
+extension=mbstring
+extension=json
+extension=curl
+extension=tokenizer
+
+; Security settings
+expose_php = Off
+allow_url_fopen = Off
+
+; Performance settings
+memory_limit = 256M
+max_execution_time = 300
+upload_max_filesize = 32M
+post_max_size = 32M

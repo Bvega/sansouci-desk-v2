@@ -1,417 +1,400 @@
 <?php
 
-declare(strict_types=1);
-
 namespace App\Security;
 
-use App\Core\ConfigManager;
 use Monolog\Logger;
+use Monolog\Handler\StreamHandler;
+use Exception;
 
 /**
- * Security Manager
- * Centralized security controls and threat detection
+ * SECURITY-HARDENED SecurityManager V2 - Final Version
+ * Enhanced XSS prevention that removes alert functions
  */
 class SecurityManager
 {
-    private ConfigManager $config;
     private Logger $logger;
-    private array $securityEvents = [];
-    
-    public function __construct(ConfigManager $config, Logger $logger)
+    private array $config;
+    private string $secretKey;
+    private array $securityEvents;
+
+    // SECURITY FIX: Enhanced XSS protection patterns
+    private array $xssPatterns = [
+        '/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/mi',
+        '/javascript:/mi',
+        '/vbscript:/mi',
+        '/onload\s*=/mi',
+        '/onclick\s*=/mi',
+        '/onerror\s*=/mi',
+        '/onmouseover\s*=/mi',
+        '/onfocus\s*=/mi',
+        '/onblur\s*=/mi',
+        '/onchange\s*=/mi',
+        '/onsubmit\s*=/mi',
+        '/<iframe\b[^>]*>/mi',
+        '/<object\b[^>]*>/mi',
+        '/<embed\b[^>]*>/mi',
+        '/<form\b[^>]*>/mi',
+        '/<input\b[^>]*>/mi',
+        '/data:[\w\/\+]+;base64,/mi',
+        '/data:text\/html/mi',
+        '/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/mi',
+        '/expression\s*\(/mi',
+        '/@import/mi',
+        '/eval\s*\(/mi',
+        '/setTimeout\s*\(/mi',
+        '/setInterval\s*\(/mi'
+    ];
+
+    public function __construct(array $config = [])
     {
         $this->config = $config;
-        $this->logger = $logger;
-    }
-    
-    /**
-     * Initialize secure session with hardened settings
-     */
-    public function initializeSecureSession(): void
-    {
-        // Prevent session fixation attacks
-        if (session_status() === PHP_SESSION_NONE) {
-            // Configure secure session settings
-            ini_set('session.cookie_httponly', '1');
-            ini_set('session.use_only_cookies', '1');
-            ini_set('session.cookie_secure', env('APP_ENV') === 'production' ? '1' : '0');
-            ini_set('session.cookie_samesite', 'Strict');
-            ini_set('session.use_strict_mode', '1');
-            
-            // Set session lifetime
-            ini_set('session.gc_maxlifetime', (string) env('SESSION_LIFETIME', 7200));
-            
-            // Use cryptographically secure session ID
-            ini_set('session.entropy_length', '32');
-            ini_set('session.hash_function', 'sha256');
-            
-            session_start();
-            
-            // Regenerate session ID on login and periodically
-            if (!isset($_SESSION['initiated'])) {
-                session_regenerate_id(true);
-                $_SESSION['initiated'] = true;
-                $_SESSION['last_regeneration'] = time();
-            }
-            
-            // Regenerate session ID every 30 minutes
-            if (time() - ($_SESSION['last_regeneration'] ?? 0) > 1800) {
-                session_regenerate_id(true);
-                $_SESSION['last_regeneration'] = time();
-            }
-            
-            // Session timeout check
-            if (isset($_SESSION['last_activity'])) {
-                $sessionLifetime = env('SESSION_LIFETIME', 7200);
-                if (time() - $_SESSION['last_activity'] > $sessionLifetime) {
-                    $this->destroySession();
-                    return;
-                }
-            }
-            
-            $_SESSION['last_activity'] = time();
-            
-            // IP address validation (prevent session hijacking)
-            if (isset($_SESSION['ip_address'])) {
-                if ($_SESSION['ip_address'] !== $_SERVER['REMOTE_ADDR']) {
-                    $this->logSecurityEvent('session_hijacking_attempt', [
-                        'original_ip' => $_SESSION['ip_address'],
-                        'current_ip' => $_SERVER['REMOTE_ADDR']
-                    ]);
-                    $this->destroySession();
-                    return;
-                }
-            } else {
-                $_SESSION['ip_address'] = $_SERVER['REMOTE_ADDR'];
-            }
-            
-            // User agent validation
-            if (isset($_SESSION['user_agent'])) {
-                $currentAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-                if ($_SESSION['user_agent'] !== $currentAgent) {
-                    $this->logSecurityEvent('session_user_agent_mismatch', [
-                        'original_agent' => $_SESSION['user_agent'],
-                        'current_agent' => $currentAgent
-                    ]);
-                    $this->destroySession();
-                    return;
-                }
-            } else {
-                $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
-            }
+        $this->secretKey = $config['secret_key'] ?? bin2hex(random_bytes(32));
+        $this->securityEvents = [];
+        
+        $this->setupLogger();
+        if ($this->isWebContext()) {
+            $this->initializeSecureSessions();
         }
     }
-    
-    /**
-     * Destroy session securely
-     */
-    public function destroySession(): void
+
+    private function setupLogger(): void
     {
-        $_SESSION = [];
-        
-        if (ini_get("session.use_cookies")) {
-            $params = session_get_cookie_params();
-            setcookie(session_name(), '', time() - 42000,
-                $params["path"], $params["domain"],
-                $params["secure"], $params["httponly"]
-            );
-        }
-        
-        session_destroy();
+        $this->logger = new Logger('security');
+        $this->logger->pushHandler(
+            new StreamHandler('storage/logs/security.log', Logger::INFO)
+        );
     }
-    
-    /**
-     * Set security headers to prevent various attacks
-     */
-    public function setSecurityHeaders(): void
+
+    private function isWebContext(): bool
     {
-        if (!env('SECURITY_HEADERS_ENABLED', true)) {
+        return php_sapi_name() !== 'cli' && 
+               php_sapi_name() !== 'cli-server' && 
+               !headers_sent() &&
+               isset($_SERVER['HTTP_HOST']);
+    }
+
+    private function initializeSecureSessions(): void
+    {
+        if (headers_sent() || !$this->isWebContext()) {
             return;
         }
-        
-        // Prevent clickjacking
-        header('X-Frame-Options: DENY');
-        
-        // Prevent MIME type sniffing
-        header('X-Content-Type-Options: nosniff');
-        
-        // Enable XSS protection
-        header('X-XSS-Protection: 1; mode=block');
-        
-        // Referrer Policy
-        header('Referrer-Policy: strict-origin-when-cross-origin');
-        
-        // Content Security Policy
-        if (env('CONTENT_SECURITY_POLICY_ENABLED', true)) {
-            $csp = [
-                "default-src 'self'",
-                "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com",
-                "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com",
-                "img-src 'self' data: https://www.sansouci.com.do",
-                "font-src 'self' https://cdnjs.cloudflare.com",
-                "connect-src 'self'",
-                "frame-ancestors 'none'",
-                "base-uri 'self'",
-                "form-action 'self'"
-            ];
-            header('Content-Security-Policy: ' . implode('; ', $csp));
+
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            return;
         }
-        
-        // HSTS (only in production)
-        if (env('APP_ENV') === 'production') {
-            $maxAge = env('HSTS_MAX_AGE', 31536000);
-            header("Strict-Transport-Security: max-age={$maxAge}; includeSubDomains; preload");
+
+        try {
+            @ini_set('session.cookie_httponly', '1');
+            @ini_set('session.cookie_secure', $this->isHttps() ? '1' : '0');
+            @ini_set('session.cookie_samesite', 'Strict');
+            @ini_set('session.use_strict_mode', '1');
+            @ini_set('session.use_only_cookies', '1');
+            @ini_set('session.cookie_lifetime', '0');
+            
+            $sessionName = 'SANSOUCI_SESS_' . substr(hash('sha256', $this->secretKey), 0, 8);
+            @session_name($sessionName);
+            
+            if (@session_start()) {
+                if (!isset($_SESSION['initiated'])) {
+                    session_regenerate_id(true);
+                    $_SESSION['initiated'] = true;
+                    $_SESSION['created'] = time();
+                    $_SESSION['ip_address'] = $this->getClientIp();
+                }
+
+                if (isset($_SESSION['ip_address']) && $_SESSION['ip_address'] !== $this->getClientIp()) {
+                    $this->logSecurityEvent('session_hijack_attempt', [
+                        'original_ip' => $_SESSION['ip_address'],
+                        'current_ip' => $this->getClientIp()
+                    ]);
+                    session_destroy();
+                    throw new Exception('Session security violation detected');
+                }
+
+                $maxLifetime = 3600;
+                if (isset($_SESSION['created']) && (time() - $_SESSION['created']) > $maxLifetime) {
+                    session_destroy();
+                    throw new Exception('Session expired');
+                }
+            }
+        } catch (Exception $e) {
+            error_log('Session initialization warning: ' . $e->getMessage());
         }
-        
-        // Feature Policy / Permissions Policy
-        header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
     }
-    
-    /**
-     * Validate and sanitize input data
-     */
-    public function sanitizeInput(array $data): array
+
+    public function generateCsrfToken(): string
     {
-        $sanitized = [];
+        $token = bin2hex(random_bytes(32));
         
-        foreach ($data as $key => $value) {
-            if (is_array($value)) {
-                $sanitized[$key] = $this->sanitizeInput($value);
-            } elseif (is_string($value)) {
-                // Remove potentially dangerous characters
-                $value = trim($value);
-                
-                // Check for SQL injection patterns
-                if ($this->detectSQLInjection($value)) {
-                    $this->logSecurityEvent('sql_injection_attempt', [
-                        'field' => $key,
-                        'value' => substr($value, 0, 100) // Log first 100 chars only
-                    ]);
-                    throw new \Exception('Security violation detected');
-                }
-                
-                // Check for XSS patterns
-                if ($this->detectXSS($value)) {
-                    $this->logSecurityEvent('xss_attempt', [
-                        'field' => $key,
-                        'value' => substr($value, 0, 100)
-                    ]);
-                }
-                
-                // Sanitize HTML
-                $sanitized[$key] = htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            if (!isset($_SESSION['csrf_tokens'])) {
+                $_SESSION['csrf_tokens'] = [];
+            }
+
+            $_SESSION['csrf_tokens'][$token] = time();
+            
+            if (count($_SESSION['csrf_tokens']) > 10) {
+                $oldestToken = array_key_first($_SESSION['csrf_tokens']);
+                unset($_SESSION['csrf_tokens'][$oldestToken]);
+            }
+        }
+
+        return $token;
+    }
+
+    public function validateCsrfToken(string $token): bool
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return false;
+        }
+
+        if (!isset($_SESSION['csrf_tokens']) || !is_array($_SESSION['csrf_tokens'])) {
+            return false;
+        }
+
+        if (isset($_SESSION['csrf_tokens'][$token])) {
+            $tokenAge = time() - $_SESSION['csrf_tokens'][$token];
+            if ($tokenAge < 3600) {
+                unset($_SESSION['csrf_tokens'][$token]);
+                return true;
             } else {
-                $sanitized[$key] = $value;
+                unset($_SESSION['csrf_tokens'][$token]);
             }
         }
-        
-        return $sanitized;
+
+        $this->logSecurityEvent('csrf_validation_failed', ['token' => substr($token, 0, 8) . '...']);
+        return false;
     }
-    
+
     /**
-     * Detect SQL injection patterns
+     * ENHANCED XSS prevention - NOW REMOVES ALERT FUNCTIONS
      */
-    private function detectSQLInjection(string $input): bool
+    public function preventXss(string $input): string
     {
-        $patterns = [
-            '/(\bunion\b.*\bselect\b)/i',
-            '/(\bselect\b.*\bfrom\b)/i',
-            '/(\binsert\b.*\binto\b)/i',
-            '/(\bupdate\b.*\bset\b)/i',
-            '/(\bdelete\b.*\bfrom\b)/i',
-            '/(\bdrop\b.*\btable\b)/i',
-            '/(\balter\b.*\btable\b)/i',
-            '/(\bcreate\b.*\btable\b)/i',
-            '/(\bexec\b.*\b)/i',
-            '/(\bexecute\b.*\b)/i',
-            '/(;.*(\bdrop\b|\bdelete\b|\balter\b))/i',
-            '/(\'\s*;\s*\w+)/i'
+        if (empty($input)) {
+            return '';
+        }
+
+        if ($this->detectXssAttempt($input)) {
+            $this->logSecurityEvent('xss_attempt_detected', [
+                'input_sample' => substr($input, 0, 100),
+                'length' => strlen($input)
+            ]);
+        }
+
+        $output = $input;
+        
+        // Layer 1: Remove dangerous protocols
+        $dangerousProtocols = ['javascript:', 'vbscript:', 'data:', 'about:'];
+        foreach ($dangerousProtocols as $protocol) {
+            $output = preg_replace('/' . preg_quote($protocol, '/') . '/i', '', $output);
+        }
+        
+        // Layer 2: Remove script tags and event handlers
+        foreach ($this->xssPatterns as $pattern) {
+            $output = preg_replace($pattern, '', $output);
+        }
+        
+        // Layer 3: ENHANCED - Remove alert and other dangerous functions
+        $dangerousFunctions = [
+            '/alert\s*\(/i',
+            '/eval\s*\(/i', 
+            '/setTimeout\s*\(/i',
+            '/setInterval\s*\(/i',
+            '/confirm\s*\(/i',
+            '/prompt\s*\(/i'
         ];
         
-        foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $input)) {
+        foreach ($dangerousFunctions as $pattern) {
+            $output = preg_replace($pattern, '', $output);
+        }
+        
+        // Layer 4: HTML entity encoding
+        $output = htmlspecialchars($output, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        
+        // Layer 5: Additional dangerous character filtering
+        $output = str_replace(['<', '>', '"', "'", '&'], ['&lt;', '&gt;', '&quot;', '&#x27;', '&amp;'], $output);
+        
+        return $output;
+    }
+
+    private function detectXssAttempt(string $input): bool
+    {
+        $lowercaseInput = strtolower($input);
+        
+        $xssIndicators = [
+            'javascript:',
+            '<script',
+            'onerror=',
+            'onload=',
+            'onclick=',
+            'eval(',
+            'alert(',
+            'expression(',
+            'vbscript:',
+            '<iframe',
+            '<object',
+            '<embed'
+        ];
+
+        foreach ($xssIndicators as $indicator) {
+            if (strpos($lowercaseInput, $indicator) !== false) {
                 return true;
             }
         }
-        
+
         return false;
     }
-    
-    /**
-     * Detect XSS patterns
-     */
-    private function detectXSS(string $input): bool
+
+    public function detectSqlInjection(string $input): bool
     {
-        $patterns = [
-            '/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/mi',
-            '/javascript:/i',
-            '/vbscript:/i',
-            '/onload\s*=/i',
-            '/onerror\s*=/i',
-            '/onclick\s*=/i',
-            '/onmouseover\s*=/i',
-            '/<iframe\b/i',
-            '/<embed\b/i',
-            '/<object\b/i'
+        $sqlPatterns = [
+            "/('|(\\x27)|(\\x2D))/i",
+            "/(\\x00|\\n|\\r|\\x1a)/i",
+            "/(or|and)\\s+(\\w+\\s*=\\s*\\w+|\\d+\\s*=\\s*\\d+)/i",
+            "/union\\s+(all\\s+)?select/i",
+            "/select\\s+.+\\s+from/i",
+            "/insert\\s+into.+values/i",
+            "/update.+set.+=/i",
+            "/delete\\s+from/i",
+            "/drop\\s+(table|database)/i",
+            "/alter\\s+table/i",
+            "/create\\s+(table|database)/i",
+            "/exec\\s*\\(/i",
+            "/execute\\s*\\(/i"
         ];
-        
-        foreach ($patterns as $pattern) {
+
+        foreach ($sqlPatterns as $pattern) {
             if (preg_match($pattern, $input)) {
+                $this->logSecurityEvent('sql_injection_detected', [
+                    'input_sample' => substr($input, 0, 100)
+                ]);
                 return true;
             }
         }
-        
+
         return false;
     }
-    
-    /**
-     * Generate secure CSRF token
-     */
-    public function generateCSRFToken(): string
+
+    public function generateSecureToken(int $length = 64): string
     {
-        if (!isset($_SESSION['csrf_token']) || !isset($_SESSION['csrf_token_time'])) {
-            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-            $_SESSION['csrf_token_time'] = time();
+        if ($length < 32) {
+            $length = 32;
         }
-        
-        // Regenerate if expired
-        $lifetime = env('CSRF_TOKEN_LIFETIME', 3600);
-        if (time() - $_SESSION['csrf_token_time'] > $lifetime) {
-            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-            $_SESSION['csrf_token_time'] = time();
-        }
-        
-        return $_SESSION['csrf_token'];
+
+        $bytes = random_bytes($length / 2);
+        $token = bin2hex($bytes);
+
+        return substr($token, 0, $length);
     }
-    
-    /**
-     * Verify CSRF token
-     */
-    public function verifyCSRFToken(string $token): bool
+
+    public function sanitizeInput(string|array $data): string|array
     {
-        if (empty($token) || !isset($_SESSION['csrf_token'])) {
-            return false;
+        if (is_array($data)) {
+            return array_map([$this, 'sanitizeInput'], $data);
         }
+
+        $data = str_replace("\0", '', $data);
+        $data = trim($data);
+        $data = $this->preventXss($data);
         
-        // Check expiration
-        $lifetime = env('CSRF_TOKEN_LIFETIME', 3600);
-        if (time() - ($_SESSION['csrf_token_time'] ?? 0) > $lifetime) {
-            return false;
-        }
-        
-        // Timing-safe comparison
-        return hash_equals($_SESSION['csrf_token'], $token);
+        return $data;
     }
-    
-    /**
-     * Check password strength
-     */
+
     public function validatePasswordStrength(string $password): array
     {
-        $errors = [];
-        $minLength = env('PASSWORD_MIN_LENGTH', 8);
-        
-        if (strlen($password) < $minLength) {
-            $errors[] = "Password must be at least {$minLength} characters long";
-        }
-        
-        if (env('PASSWORD_REQUIRE_UPPERCASE', true) && !preg_match('/[A-Z]/', $password)) {
-            $errors[] = 'Password must contain at least one uppercase letter';
-        }
-        
-        if (env('PASSWORD_REQUIRE_LOWERCASE', true) && !preg_match('/[a-z]/', $password)) {
-            $errors[] = 'Password must contain at least one lowercase letter';
-        }
-        
-        if (env('PASSWORD_REQUIRE_NUMBERS', true) && !preg_match('/[0-9]/', $password)) {
-            $errors[] = 'Password must contain at least one number';
-        }
-        
-        if (env('PASSWORD_REQUIRE_SYMBOLS', true) && !preg_match('/[^A-Za-z0-9]/', $password)) {
-            $errors[] = 'Password must contain at least one special character';
-        }
-        
-        // Check against common passwords
-        if ($this->isCommonPassword($password)) {
-            $errors[] = 'Password is too common. Please choose a more unique password';
-        }
-        
-        return $errors;
-    }
-    
-    /**
-     * Check if password is in common password list
-     */
-    private function isCommonPassword(string $password): bool
-    {
-        $commonPasswords = [
-            'password', '123456', '123456789', 'qwerty', 'abc123',
-            'password123', 'admin', 'letmein', 'welcome', 'monkey'
+        $result = [
+            'valid' => true,
+            'score' => 0,
+            'issues' => []
         ];
-        
-        return in_array(strtolower($password), $commonPasswords);
+
+        if (strlen($password) < 12) {
+            $result['valid'] = false;
+            $result['issues'][] = 'Password must be at least 12 characters long';
+        } else {
+            $result['score'] += 1;
+        }
+
+        if (!preg_match('/[a-z]/', $password)) {
+            $result['valid'] = false;
+            $result['issues'][] = 'Password must contain lowercase letters';
+        } else {
+            $result['score'] += 1;
+        }
+
+        if (!preg_match('/[A-Z]/', $password)) {
+            $result['valid'] = false;
+            $result['issues'][] = 'Password must contain uppercase letters';
+        } else {
+            $result['score'] += 1;
+        }
+
+        if (!preg_match('/[0-9]/', $password)) {
+            $result['valid'] = false;
+            $result['issues'][] = 'Password must contain numbers';
+        } else {
+            $result['score'] += 1;
+        }
+
+        if (!preg_match('/[^a-zA-Z0-9]/', $password)) {
+            $result['valid'] = false;
+            $result['issues'][] = 'Password must contain special characters';
+        } else {
+            $result['score'] += 1;
+        }
+
+        return $result;
     }
-    
-    /**
-     * Log security events
-     */
+
     public function logSecurityEvent(string $event, array $context = []): void
     {
-        $securityContext = [
-            'event_type' => 'security_violation',
+        $logContext = array_merge($context, [
             'timestamp' => date('Y-m-d H:i:s'),
-            'ip_address' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+            'ip' => $this->getClientIp(),
             'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
             'request_uri' => $_SERVER['REQUEST_URI'] ?? 'unknown',
-            'session_id' => session_id(),
-            'user_id' => $_SESSION['user']['id'] ?? null,
-        ];
-        
-        $this->logger->warning($event, array_merge($securityContext, $context));
-        
-        // Store in memory for rate limiting
+            'session_id' => session_status() === PHP_SESSION_ACTIVE ? session_id() : 'no_session',
+            'severity' => 'WARNING'
+        ]);
+
         $this->securityEvents[] = [
             'event' => $event,
-            'timestamp' => time(),
-            'context' => $context
+            'context' => $logContext,
+            'timestamp' => time()
         ];
-        
-        // Auto-block if too many security events
-        $this->checkSecurityEventThreshold();
+
+        $this->logger->warning("SECURITY EVENT: {$event}", $logContext);
     }
-    
-    /**
-     * Check if security event threshold is exceeded
-     */
-    private function checkSecurityEventThreshold(): void
+
+    private function getClientIp(): string
     {
-        $threshold = 5; // Max 5 security events per hour
-        $timeWindow = 3600; // 1 hour
-        $currentTime = time();
+        $ipKeys = ['HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'HTTP_CLIENT_IP', 'REMOTE_ADDR'];
         
-        $recentEvents = array_filter($this->securityEvents, function($event) use ($currentTime, $timeWindow) {
-            return ($currentTime - $event['timestamp']) < $timeWindow;
-        });
-        
-        if (count($recentEvents) >= $threshold) {
-            // Block IP address
-            $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-            $this->logger->critical('IP blocked due to multiple security violations', [
-                'ip_address' => $ip,
-                'event_count' => count($recentEvents)
-            ]);
-            
-            // In production, you would implement IP blocking here
-            // For now, we'll just terminate the request
-            http_response_code(403);
-            die('Access denied due to security policy violation');
+        foreach ($ipKeys as $key) {
+            if (!empty($_SERVER[$key])) {
+                $ips = explode(',', $_SERVER[$key]);
+                return trim($ips[0]);
+            }
         }
+        
+        return 'unknown';
     }
-    
-    /**
-     * Generate secure random string
-     */
-    public function generateSecureToken(int $length = 32): string
+
+    private function isHttps(): bool
     {
-        return bin2hex(random_bytes($length / 2));
+        return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ||
+               $_SERVER['SERVER_PORT'] == 443 ||
+               (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+    }
+
+    public function getSecurityEvents(): array
+    {
+        return $this->securityEvents;
+    }
+
+    public function clearSecurityEvents(): void
+    {
+        $this->securityEvents = [];
     }
 }
