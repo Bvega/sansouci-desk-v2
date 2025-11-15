@@ -7,6 +7,8 @@ namespace App\Core;
 use Exception;
 use ReflectionClass;
 use ReflectionException;
+use ReflectionType;
+use ReflectionNamedType;
 
 /**
  * Dependency Injection Container
@@ -14,8 +16,19 @@ use ReflectionException;
  */
 class Container
 {
+    /**
+     * @var array<string, array<string, mixed>>
+     */
     private array $bindings = [];
+    
+    /**
+     * @var array<string, object>
+     */
     private array $instances = [];
+    
+    /**
+     * @var array<string, bool>
+     */
     private array $singletons = [];
     
     /**
@@ -93,6 +106,11 @@ class Container
     private function resolve(string $class): object
     {
         try {
+            // FIXED: Ensure class exists before creating ReflectionClass
+            if (!class_exists($class)) {
+                throw new Exception("Class {$class} not found");
+            }
+            
             $reflection = new ReflectionClass($class);
             
             // Check if class is instantiable
@@ -114,8 +132,9 @@ class Container
             foreach ($parameters as $parameter) {
                 $type = $parameter->getType();
                 
-                if (!$type || $type->isBuiltin()) {
-                    // Handle built-in types or no type hint
+                // FIXED: Proper ReflectionType handling
+                if (!$type) {
+                    // No type hint
                     if ($parameter->isDefaultValueAvailable()) {
                         $dependencies[] = $parameter->getDefaultValue();
                     } else {
@@ -124,8 +143,31 @@ class Container
                         );
                     }
                 } else {
-                    // Resolve class dependency
-                    $dependencies[] = $this->get($type->getName());
+                    // Check if it's a ReflectionNamedType (PHP 8+ compatibility)
+                    if ($type instanceof ReflectionNamedType) {
+                        if ($type->isBuiltin()) {
+                            // Handle built-in types
+                            if ($parameter->isDefaultValueAvailable()) {
+                                $dependencies[] = $parameter->getDefaultValue();
+                            } else {
+                                throw new Exception(
+                                    "Cannot resolve built-in parameter {$parameter->getName()} in {$class}"
+                                );
+                            }
+                        } else {
+                            // Resolve class dependency
+                            $dependencies[] = $this->get($type->getName());
+                        }
+                    } else {
+                        // Fallback for older PHP versions or union types
+                        if ($parameter->isDefaultValueAvailable()) {
+                            $dependencies[] = $parameter->getDefaultValue();
+                        } else {
+                            throw new Exception(
+                                "Cannot resolve complex parameter {$parameter->getName()} in {$class}"
+                            );
+                        }
+                    }
                 }
             }
             
@@ -154,6 +196,7 @@ class Container
     
     /**
      * Get all registered services (for debugging)
+     * @return array<int, string>
      */
     public function getRegisteredServices(): array
     {
@@ -170,44 +213,56 @@ class Container
     {
         // Register database connection
         $this->singleton('database', function() {
-            return new \App\Database\Connection([
-                'host' => env('DB_HOST'),
-                'database' => env('DB_DATABASE'),
-                'username' => env('DB_USERNAME'),
-                'password' => env('DB_PASSWORD'),
-                'charset' => 'utf8mb4',
-                'options' => [
-                    \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
-                    \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
-                    \PDO::ATTR_EMULATE_PREPARES => false,
-                ]
-            ]);
+            if (class_exists('\App\Database\Connection')) {
+                return new \App\Database\Connection([
+                    'host' => env('DB_HOST'),
+                    'database' => env('DB_DATABASE'),
+                    'username' => env('DB_USERNAME'),
+                    'password' => env('DB_PASSWORD'),
+                    'charset' => 'utf8mb4',
+                    'options' => [
+                        \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                        \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+                        \PDO::ATTR_EMULATE_PREPARES => false,
+                    ]
+                ]);
+            }
+            throw new Exception('Database connection class not available');
         });
         
-        // Register email service
+        // Register email service - FIXED: Conditional class loading
         $this->singleton('email', function() {
-            return new \App\Services\EmailService([
-                'host' => env('MAIL_HOST'),
-                'port' => env('MAIL_PORT'),
-                'username' => env('MAIL_USERNAME'),
-                'password' => env('MAIL_PASSWORD'),
-                'encryption' => env('MAIL_ENCRYPTION'),
-                'from_address' => env('MAIL_FROM_ADDRESS'),
-                'from_name' => env('MAIL_FROM_NAME')
-            ]);
+            if (class_exists('\App\Services\EmailService')) {
+                return new \App\Services\EmailService([
+                    'host' => env('MAIL_HOST'),
+                    'port' => env('MAIL_PORT'),
+                    'username' => env('MAIL_USERNAME'),
+                    'password' => env('MAIL_PASSWORD'),
+                    'encryption' => env('MAIL_ENCRYPTION'),
+                    'from_address' => env('MAIL_FROM_ADDRESS'),
+                    'from_name' => env('MAIL_FROM_NAME')
+                ]);
+            }
+            throw new Exception('Email service not available');
         });
         
-        // Register authentication service
+        // Register authentication service - FIXED: Conditional class loading
         $this->singleton('auth', function($container) {
-            return new \App\Services\AuthService(
-                $container->get('database'),
-                $container->get('security')
-            );
+            if (class_exists('\App\Services\AuthService')) {
+                return new \App\Services\AuthService(
+                    $container->get('database'),
+                    $container->get('security')
+                );
+            }
+            throw new Exception('Auth service not available');
         });
         
         // Register validation service
         $this->singleton('validator', function() {
-            return new \App\Services\ValidationService();
+            if (class_exists('\App\Services\ValidationService')) {
+                return new \App\Services\ValidationService();
+            }
+            throw new Exception('Validation service not available');
         });
     }
 
@@ -222,8 +277,8 @@ class Container
             "bindings" => count($this->bindings),
             "instances" => count($this->instances),
             "singletons" => count($this->singletons),
-            "aliases" => count($this->aliases ?? []),
-            "tags" => count($this->tags ?? [])
+            "aliases" => 0, // Fixed: Remove undefined property references
+            "tags" => 0     // Fixed: Remove undefined property references
         ];
     }
 }

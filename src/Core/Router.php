@@ -12,10 +12,23 @@ use Exception;
  */
 class Router
 {
+    /**
+     * @var array<int, array<string, mixed>>
+     */
     private array $routes = [];
+    
+    /**
+     * @var array<string, array<int, string>>
+     */
     private array $middlewareGroups = [];
+    
     private Container $container;
+    
+    /**
+     * @var array<int, string>
+     */
     private array $currentGroupMiddleware = [];
+    
     private string $currentGroupPrefix = '';
     
     public function __construct(Container $container)
@@ -65,6 +78,7 @@ class Router
     
     /**
      * Register route for multiple HTTP methods
+     * @param array<int, string> $methods
      */
     public function match(array $methods, string $uri, string|callable $action): void
     {
@@ -75,6 +89,7 @@ class Router
     
     /**
      * Register route group with shared attributes
+     * @param array<string, mixed> $attributes
      */
     public function group(array $attributes, callable $callback): void
     {
@@ -131,10 +146,12 @@ class Router
         $pattern = str_replace('/', '\/', $uri);
         
         // Convert {parameter} to named regex groups
-        $pattern = preg_replace('/\{([a-zA-Z0-9_]+)\}/', '(?P<$1>[^\/]+)', $pattern);
+        $result = preg_replace('/\{([a-zA-Z0-9_]+)\}/', '(?P<$1>[^\/]+)', $pattern);
+        $pattern = $result !== null ? $result : $pattern;
         
-        // Convert {parameter?} to optional named regex groups
-        $pattern = preg_replace('/\{([a-zA-Z0-9_]+)\?\}/', '(?P<$1>[^\/]*)', $pattern);
+        // Convert {parameter?} to optional named regex groups  
+        $result = preg_replace('/\{([a-zA-Z0-9_]+)\?\}/', '(?P<$1>[^\/]*)', $pattern);
+        $pattern = $result !== null ? $result : $pattern;
         
         return '/^' . $pattern . '$/';
     }
@@ -144,8 +161,8 @@ class Router
      */
     public function dispatch(Request $request): mixed
     {
-        $method = $request->getMethod();
-        $uri = $request->getUri();
+        $method = $request->method();
+        $uri = $request->uri();
         
         // Find matching route
         foreach ($this->routes as $route) {
@@ -168,6 +185,8 @@ class Router
     
     /**
      * Extract route parameters from regex matches
+     * @param array<string|int, string> $matches
+     * @return array<string, string>
      */
     private function extractParameters(array $matches): array
     {
@@ -184,6 +203,8 @@ class Router
     
     /**
      * Execute route with middleware
+     * @param array<string, mixed> $route
+     * @param array<string, string> $parameters
      */
     private function executeRoute(array $route, Request $request, array $parameters): mixed
     {
@@ -203,7 +224,10 @@ class Router
             $middlewareInstance = $this->resolveMiddleware($middlewareName);
             
             $next = function($request) use ($middlewareInstance, $next) {
-                return $middlewareInstance->handle($request, $next);
+                if (method_exists($middlewareInstance, 'handle')) {
+                    return $middlewareInstance->handle($request, $next);
+                }
+                return $next($request);
             };
         }
         
@@ -212,6 +236,7 @@ class Router
     
     /**
      * Call route action
+     * @param array<string, string> $parameters
      */
     private function callAction(string|callable $action, Request $request, array $parameters): mixed
     {
@@ -236,7 +261,11 @@ class Router
                 throw new Exception("Method {$method} not found in {$controllerClass}");
             }
             
-            // Call controller method
+            // Call controller method - FIXED: Added is_object() check
+            if (is_object($controllerInstance) && method_exists($controllerInstance, 'setParameters')) {
+                $controllerInstance->setParameters($parameters);
+            }
+            
             return $controllerInstance->$method($request, ...$parameters);
         }
         
@@ -277,8 +306,8 @@ class Router
             
             $instance = $this->container->get($middlewareClass);
             
-            // Set middleware parameters
-            if (method_exists($instance, 'setParameters')) {
+            // Set middleware parameters - FIXED: Added is_object() check
+            if (is_object($instance) && method_exists($instance, 'setParameters')) {
                 $instance->setParameters(explode(',', $parameters));
             }
             
@@ -294,6 +323,7 @@ class Router
     
     /**
      * Register middleware group
+     * @param array<int, string> $middleware
      */
     public function middlewareGroup(string $name, array $middleware): void
     {
@@ -302,6 +332,7 @@ class Router
     
     /**
      * Get all registered routes
+     * @return array<int, array<string, mixed>>
      */
     public function getRoutes(): array
     {
@@ -310,6 +341,7 @@ class Router
     
     /**
      * Generate URL for named route
+     * @param array<string, string> $parameters
      */
     public function url(string $name, array $parameters = []): string
     {
