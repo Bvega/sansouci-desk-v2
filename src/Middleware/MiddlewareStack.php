@@ -13,6 +13,9 @@ use Exception;
  */
 class MiddlewareStack
 {
+    /**
+     * @var array<string, callable>
+     */
     private array $middleware = [];
     
     /**
@@ -59,6 +62,7 @@ class MiddlewareStack
     
     /**
      * Get all registered middleware
+     * @return array<string, callable>
      */
     public function getMiddleware(): array
     {
@@ -101,11 +105,13 @@ class AuthMiddleware implements MiddlewareInterface
         if (!isset($_SESSION['user'])) {
             // Log authentication attempt
             log_security_event('unauthenticated_access', [
-                'uri' => $request->getUri(),
-                'method' => $request->getMethod()
+                'uri' => $request->uri(),
+                'method' => $request->method()
             ]);
             
-            if ($request->wantsJson()) {
+            // FIXED: Check for JSON request using Accept header
+            $acceptHeader = $request->server('HTTP_ACCEPT') ?? '';
+            if (str_contains($acceptHeader, 'application/json')) {
                 http_response_code(401);
                 header('Content-Type: application/json');
                 echo json_encode(['error' => 'Authentication required']);
@@ -146,8 +152,14 @@ class GuestMiddleware implements MiddlewareInterface
  */
 class RoleMiddleware implements MiddlewareInterface
 {
+    /**
+     * @var array<int, string>
+     */
     private array $allowedRoles = [];
     
+    /**
+     * @param array<int, string> $roles
+     */
     public function setParameters(array $roles): void
     {
         $this->allowedRoles = $roles;
@@ -166,10 +178,12 @@ class RoleMiddleware implements MiddlewareInterface
                 'user_id' => $_SESSION['user']['id'],
                 'user_role' => $userRole,
                 'required_roles' => $this->allowedRoles,
-                'uri' => $request->getUri()
+                'uri' => $request->uri()
             ]);
             
-            if ($request->wantsJson()) {
+            // FIXED: Check for JSON request using Accept header
+            $acceptHeader = $request->server('HTTP_ACCEPT') ?? '';
+            if (str_contains($acceptHeader, 'application/json')) {
                 http_response_code(403);
                 header('Content-Type: application/json');
                 echo json_encode(['error' => 'Access denied']);
@@ -191,6 +205,9 @@ class ThrottleMiddleware implements MiddlewareInterface
     private int $maxAttempts = 60;
     private int $timeWindow = 3600; // 1 hour
     
+    /**
+     * @param array<int, string> $params
+     */
     public function setParameters(array $params): void
     {
         if (count($params) >= 1) {
@@ -210,10 +227,12 @@ class ThrottleMiddleware implements MiddlewareInterface
                 'key' => $key,
                 'max_attempts' => $this->maxAttempts,
                 'time_window' => $this->timeWindow,
-                'uri' => $request->getUri()
+                'uri' => $request->uri()
             ]);
             
-            if ($request->wantsJson()) {
+            // FIXED: Check for JSON request using Accept header
+            $acceptHeader = $request->server('HTTP_ACCEPT') ?? '';
+            if (str_contains($acceptHeader, 'application/json')) {
                 http_response_code(429);
                 header('Content-Type: application/json');
                 echo json_encode([
@@ -234,7 +253,7 @@ class ThrottleMiddleware implements MiddlewareInterface
     private function getThrottleKey(Request $request): string
     {
         $ip = $request->ip();
-        $uri = $request->getUri();
+        $uri = $request->uri();
         
         // Include user ID if authenticated
         $userId = $_SESSION['user']['id'] ?? 'guest';
@@ -250,7 +269,8 @@ class CorsMiddleware implements MiddlewareInterface
 {
     public function handle(Request $request, callable $next): mixed
     {
-        $origin = $request->header('Origin');
+        // FIXED: Get Origin header using server() method
+        $origin = $request->server('HTTP_ORIGIN');
         $allowedOrigins = config('cors.allowed_origins', ['localhost']);
         
         if ($origin && in_array($origin, $allowedOrigins)) {
@@ -263,7 +283,7 @@ class CorsMiddleware implements MiddlewareInterface
         header('Access-Control-Max-Age: 86400'); // 24 hours
         
         // Handle preflight OPTIONS request
-        if ($request->getMethod() === 'OPTIONS') {
+        if ($request->method() === 'OPTIONS') {
             http_response_code(200);
             exit;
         }
@@ -281,7 +301,9 @@ class SecurityHeadersMiddleware implements MiddlewareInterface
     {
         // Security headers are handled by SecurityManager
         $security = app('security');
-        $security->setSecurityHeaders();
+        if (is_object($security) && method_exists($security, 'setSecurityHeaders')) {
+            $security->setSecurityHeaders();
+        }
         
         return $next($request);
     }
@@ -304,10 +326,10 @@ class LoggingMiddleware implements MiddlewareInterface
         // Log request
         $logger = app('logger');
         $logger->info('HTTP Request', [
-            'method' => $request->getMethod(),
-            'uri' => $request->getUri(),
+            'method' => $request->method(),
+            'uri' => $request->uri(),
             'ip' => $request->ip(),
-            'user_agent' => $request->userAgent(),
+            'user_agent' => $request->server('HTTP_USER_AGENT') ?? 'Unknown',
             'user_id' => $_SESSION['user']['id'] ?? null,
             'execution_time' => $executionTime,
             'memory_usage' => memory_get_peak_usage(true)
@@ -342,6 +364,9 @@ class SanitizeInputMiddleware implements MiddlewareInterface
  */
 class VerifyCsrfTokenMiddleware implements MiddlewareInterface
 {
+    /**
+     * @var array<int, string>
+     */
     private array $excludedRoutes = [
         '/api/webhook',
         '/api/callback'
@@ -350,27 +375,32 @@ class VerifyCsrfTokenMiddleware implements MiddlewareInterface
     public function handle(Request $request, callable $next): mixed
     {
         // Skip CSRF for safe methods
-        if (in_array($request->getMethod(), ['GET', 'HEAD', 'OPTIONS'])) {
+        if (in_array($request->method(), ['GET', 'HEAD', 'OPTIONS'])) {
             return $next($request);
         }
         
         // Skip CSRF for excluded routes
-        $uri = $request->getUri();
+        $uri = $request->uri();
         foreach ($this->excludedRoutes as $route) {
             if (str_starts_with($uri, $route)) {
                 return $next($request);
             }
         }
         
-        // Verify CSRF token
-        if (!$request->verifyCsrfToken()) {
+        // FIXED: Basic CSRF token verification using POST data
+        $csrfToken = $request->post('_token') ?? $request->server('HTTP_X_CSRF_TOKEN') ?? '';
+        $sessionToken = $_SESSION['csrf_token'] ?? '';
+        
+        if (empty($csrfToken) || !hash_equals($sessionToken, $csrfToken)) {
             log_security_event('csrf_token_mismatch', [
                 'uri' => $uri,
-                'method' => $request->getMethod(),
-                'token_provided' => !empty($request->csrfToken())
+                'method' => $request->method(),
+                'token_provided' => !empty($csrfToken)
             ]);
             
-            if ($request->wantsJson()) {
+            // FIXED: Check for JSON request using Accept header
+            $acceptHeader = $request->server('HTTP_ACCEPT') ?? '';
+            if (str_contains($acceptHeader, 'application/json')) {
                 http_response_code(419);
                 header('Content-Type: application/json');
                 echo json_encode(['error' => 'CSRF token mismatch']);
