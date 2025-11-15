@@ -15,10 +15,22 @@ use Exception;
 class Connection
 {
     private PDO $pdo;
+    
+    /**
+     * @var array<string, mixed>
+     */
     private array $config;
+    
+    /**
+     * @var array<int, array<string, mixed>>
+     */
     private array $queryLog = [];
+    
     private bool $logging = false;
     
+    /**
+     * @param array<string, mixed> $config
+     */
     public function __construct(array $config)
     {
         $this->config = $config;
@@ -70,6 +82,7 @@ class Connection
     
     /**
      * Execute prepared statement with parameters
+     * @param array<string|int, mixed> $params
      */
     public function query(string $sql, array $params = []): DatabaseResult
     {
@@ -102,6 +115,8 @@ class Connection
     
     /**
      * Execute SELECT query and return all results
+     * @param array<string|int, mixed> $params
+     * @return array<int, array<string, mixed>>
      */
     public function select(string $sql, array $params = []): array
     {
@@ -111,6 +126,8 @@ class Connection
     
     /**
      * Execute SELECT query and return first result
+     * @param array<string|int, mixed> $params
+     * @return array<string, mixed>|null
      */
     public function selectOne(string $sql, array $params = []): ?array
     {
@@ -121,6 +138,7 @@ class Connection
     
     /**
      * Execute INSERT statement and return last insert ID
+     * @param array<string, mixed> $data
      */
     public function insert(string $table, array $data): int
     {
@@ -136,6 +154,8 @@ class Connection
     
     /**
      * Execute UPDATE statement and return affected rows
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $where
      */
     public function update(string $table, array $data, array $where): int
     {
@@ -151,6 +171,7 @@ class Connection
     
     /**
      * Execute DELETE statement and return affected rows
+     * @param array<string, mixed> $where
      */
     public function delete(string $table, array $where): int
     {
@@ -239,6 +260,7 @@ class Connection
     
     /**
      * Bind parameters to prepared statement with type detection
+     * @param array<string|int, mixed> $params
      */
     private function bindParameters(\PDOStatement $stmt, array $params): void
     {
@@ -258,6 +280,7 @@ class Connection
     
     /**
      * Log SQL query for debugging
+     * @param array<string|int, mixed> $params
      */
     private function logQuery(string $sql, array $params, float $executionTime): void
     {
@@ -276,6 +299,7 @@ class Connection
     
     /**
      * Log database errors
+     * @param array<string|int, mixed> $params
      */
     private function logError(string $sql, array $params, PDOException $e): void
     {
@@ -292,6 +316,7 @@ class Connection
     
     /**
      * Get query log
+     * @return array<int, array<string, mixed>>
      */
     public function getQueryLog(): array
     {
@@ -315,11 +340,12 @@ class Connection
     }
     
     /**
-     * Get last insert ID
+     * Get last insert ID - FIXED: Proper return type handling
      */
     public function lastInsertId(): string
     {
-        return $this->pdo->lastInsertId();
+        $result = $this->pdo->lastInsertId();
+        return $result !== false ? $result : '0';
     }
     
     /**
@@ -337,6 +363,7 @@ class Connection
     
     /**
      * Get table columns
+     * @return array<int, array<string, mixed>>
      */
     public function getTableColumns(string $table): array
     {
@@ -366,6 +393,7 @@ class DatabaseResult
     
     /**
      * Fetch single row
+     * @return array<string, mixed>|false
      */
     public function fetch(): array|false
     {
@@ -374,6 +402,7 @@ class DatabaseResult
     
     /**
      * Fetch all rows
+     * @return array<int, array<string, mixed>>
      */
     public function fetchAll(): array
     {
