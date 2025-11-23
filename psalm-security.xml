@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<psalm
+    errorLevel="1"
+    resolveFromConfigFile="true"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="https://getpsalm.org/schema/config"
+    xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
+    findUnusedBaselineEntry="true"
+    findUnusedCode="true"
+>
+    <projectFiles>
+        <directory name="src" />
+        <directory name="config" />
+        <directory name="database" />
+        <ignoreFiles>
+            <directory name="vendor" />
+            <directory name="storage" />
+        </ignoreFiles>
+    </projectFiles>
+    
+    <plugins>
+        <pluginClass class="Psalm\Plugin\SecurityPlugin\Plugin" />
+    </plugins>
+    
+    <issueHandlers>
+        <TaintedInput errorLevel="error" />
+        <TaintedSql errorLevel="error" />
+        <TaintedShell errorLevel="error" />
+        <TaintedInclude errorLevel="error" />
+        <TaintedCookie errorLevel="error" />
+        <TaintedHeader errorLevel="error" />
+    </issueHandlers>
+</psalm>

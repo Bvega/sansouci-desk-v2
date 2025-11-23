@@ -167,7 +167,7 @@ class SecurityManager
     }
 
     /**
-     * ENHANCED XSS prevention - NOW REMOVES ALERT FUNCTIONS
+     * FIXED XSS prevention - Eliminates double-escaping issue
      */
     public function preventXss(string $input): string
     {
@@ -195,7 +195,7 @@ class SecurityManager
             $output = preg_replace($pattern, '', $output);
         }
         
-        // Layer 3: ENHANCED - Remove alert and other dangerous functions
+        // Layer 3: Remove alert and other dangerous functions
         $dangerousFunctions = [
             '/alert\s*\(/i',
             '/eval\s*\(/i', 
@@ -209,11 +209,11 @@ class SecurityManager
             $output = preg_replace($pattern, '', $output);
         }
         
-        // Layer 4: HTML entity encoding
+        // Layer 4: HTML entity encoding (sufficient for XSS prevention)
         $output = htmlspecialchars($output, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         
-        // Layer 5: Additional dangerous character filtering
-        $output = str_replace(['<', '>', '"', "'", '&'], ['&lt;', '&gt;', '&quot;', '&#x27;', '&amp;'], $output);
+        // FIXED: Removed Layer 5 to prevent double-escaping
+        // htmlspecialchars() already properly handles all dangerous characters
         
         return $output;
     }
@@ -396,5 +396,48 @@ class SecurityManager
     public function clearSecurityEvents(): void
     {
         $this->securityEvents = [];
+    }
+
+    /**
+     * Set comprehensive security headers for HTTP responses
+     */
+    public function setSecurityHeaders(): void
+    {
+        if (headers_sent() || !$this->isWebContext()) {
+            return;
+        }
+
+        // Prevent XSS attacks
+        header('X-XSS-Protection: 1; mode=block');
+        
+        // Prevent content type sniffing
+        header('X-Content-Type-Options: nosniff');
+        
+        // Prevent clickjacking
+        header('X-Frame-Options: DENY');
+        
+        // Force HTTPS (if on HTTPS)
+        if ($this->isHttps()) {
+            header('Strict-Transport-Security: max-age=31536000; includeSubDomains; preload');
+        }
+        
+        // Content Security Policy
+        $csp = "default-src 'self'; " .
+               "script-src 'self' 'unsafe-inline'; " .
+               "style-src 'self' 'unsafe-inline'; " .
+               "img-src 'self' data: https:; " .
+               "font-src 'self' https: data:; " .
+               "connect-src 'self'; " .
+               "frame-ancestors 'none'; " .
+               "base-uri 'self'; " .
+               "form-action 'self'";
+        
+        header("Content-Security-Policy: {$csp}");
+        
+        // Additional security headers
+        header('Referrer-Policy: strict-origin-when-cross-origin');
+        header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+        
+        $this->logSecurityEvent('security_headers_applied');
     }
 }

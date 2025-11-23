@@ -1,0 +1,24 @@
+parameters:
+    level: 8
+    paths:
+        - src/
+        - config/
+        - database/migrations/
+        - public/index.php
+    
+    # Security-focused rules
+    checkTooWidePropertyType: true
+    checkUnionTypes: true
+    checkMissingTypehints: true
+    
+    # Security extensions
+    includes:
+        - vendor/phpstan/phpstan-strict-rules/rules.neon
+    
+    # Custom security rules
+    ignoreErrors:
+        # Add specific security exceptions here if needed
+    
+    # Baseline for existing code
+    baseline: phpstan-security-baseline.neon
+    
