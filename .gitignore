@@ -116,3 +116,4 @@ deploy-config.json
 *.tar.gz
 backups/
 backups_local/
+backups_local/
