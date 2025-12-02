@@ -13,11 +13,16 @@ use Exception;
 class SecurityManager
 {
     private Logger $logger;
+    
+    /** @var array<string, mixed> */
     private array $config;
+    
     private string $secretKey;
+    
+    /** @var array<int, array{event: string, context: array<string, mixed>, timestamp: int}> */
     private array $securityEvents;
 
-    // SECURITY FIX: Enhanced XSS protection patterns
+    /** @var array<int, string> */
     private array $xssPatterns = [
         '/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/mi',
         '/javascript:/mi',
@@ -45,6 +50,9 @@ class SecurityManager
         '/setInterval\s*\(/mi'
     ];
 
+    /**
+     * @param array<string, mixed> $config
+     */
     public function __construct(array $config = [])
     {
         $this->config = $config;
@@ -55,6 +63,15 @@ class SecurityManager
         if ($this->isWebContext()) {
             $this->initializeSecureSessions();
         }
+    }
+
+    /**
+     * Get configuration value
+     * @return array<string, mixed>
+     */
+    public function getConfig(): array
+    {
+        return $this->config;
     }
 
     private function setupLogger(): void
@@ -187,12 +204,14 @@ class SecurityManager
         // Layer 1: Remove dangerous protocols
         $dangerousProtocols = ['javascript:', 'vbscript:', 'data:', 'about:'];
         foreach ($dangerousProtocols as $protocol) {
-            $output = preg_replace('/' . preg_quote($protocol, '/') . '/i', '', $output);
+            $result = preg_replace('/' . preg_quote($protocol, '/') . '/i', '', $output);
+            $output = $result ?? $output;
         }
         
         // Layer 2: Remove script tags and event handlers
         foreach ($this->xssPatterns as $pattern) {
-            $output = preg_replace($pattern, '', $output);
+            $result = preg_replace($pattern, '', $output);
+            $output = $result ?? $output;
         }
         
         // Layer 3: Remove alert and other dangerous functions
@@ -206,7 +225,8 @@ class SecurityManager
         ];
         
         foreach ($dangerousFunctions as $pattern) {
-            $output = preg_replace($pattern, '', $output);
+            $result = preg_replace($pattern, '', $output);
+            $output = $result ?? $output;
         }
         
         // Layer 4: HTML entity encoding (sufficient for XSS prevention)
@@ -282,12 +302,16 @@ class SecurityManager
             $length = 32;
         }
 
-        $bytes = random_bytes($length / 2);
+        $bytes = random_bytes(max(16, (int)($length / 2)));
         $token = bin2hex($bytes);
 
         return substr($token, 0, $length);
     }
 
+    /**
+     * @param string|array<string, mixed> $data
+     * @return string|array<string, mixed>
+     */
     public function sanitizeInput(string|array $data): string|array
     {
         if (is_array($data)) {
@@ -301,6 +325,9 @@ class SecurityManager
         return $data;
     }
 
+    /**
+     * @return array{valid: bool, score: int, issues: array<int, string>}
+     */
     public function validatePasswordStrength(string $password): array
     {
         $result = [
@@ -347,6 +374,9 @@ class SecurityManager
         return $result;
     }
 
+    /**
+     * @param array<string, mixed> $context
+     */
     public function logSecurityEvent(string $event, array $context = []): void
     {
         $logContext = array_merge($context, [
@@ -388,6 +418,9 @@ class SecurityManager
                (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
     }
 
+    /**
+     * @return array<int, array{event: string, context: array<string, mixed>, timestamp: int}>
+     */
     public function getSecurityEvents(): array
     {
         return $this->securityEvents;
